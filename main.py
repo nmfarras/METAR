@@ -1,6 +1,5 @@
 import requests
 import re
-from datetime import datetime
 
 def fetch_metar_taf_data(icao_code):
     url = f'https://aviationweather.gov/cgi-bin/data/metar.php?ids={icao_code}&hours=0&sep=true&taf=true'
@@ -21,7 +20,27 @@ def get_date_suffix(day):
         return 'rd'
     else:
         return 'th'
-        
+
+def parse_cloud_condition(cloud_code):
+    cloud_map = {
+        "FEW": "few clouds",
+        "SCT": "scattered clouds",
+        "BKN": "broken clouds",
+        "OVC": "overcast",
+        "CLR": "clear skies",
+        "SKC": "sky clear",
+        "NCD": "no significant cloud detected",
+        "NSC": "no significant cloud"
+    }
+    altitude = int(cloud_code[3:6]) * 100
+    cloud_type = cloud_code[:3]
+    if 'CB' in cloud_code:
+        return f"{cloud_map.get(cloud_type, cloud_type)} with cumulonimbus at {altitude} feet AGL"
+    elif 'TCU' in cloud_code:
+        return f"{cloud_map.get(cloud_type, cloud_type)} with towering cumulus at {altitude} feet AGL"
+    else:
+        return f"{cloud_map.get(cloud_type, cloud_type)} at {altitude} feet AGL"
+
 def parse_metar(raw_metar):
     metar_pattern = re.compile(
         r'(?P<station>\w{4})\s'
@@ -30,7 +49,7 @@ def parse_metar(raw_metar):
         r'(?P<wind>(\d{3}\d{2}(G\d{2})?KT|VRB\d{2}KT|00000KT))\s'
         r'((?P<variable_wind>\d{3}V\d{3})\s)?'
         r'(?P<visibility>\d{4})\s'
-        r'(?P<clouds>(FEW\d{3}|SCT\d{3}|BKN\d{3}|OVC\d{3}|NCD))\s'
+        r'(?P<clouds>(CLR|SKC|NCD|NSC|FEW\d{3}(CB|TCU)?|SCT\d{3}(CB|TCU)?|BKN\d{3}(CB|TCU)?|OVC\d{3}(CB|TCU)?)(\sCLR|\sSKC|\sNCD|\sNSC|\sFEW\d{3}(CB|TCU)?|\sSCT\d{3}(CB|TCU)?|\sBKN\d{3}(CB|TCU)?|\sOVC\d{3}(CB|TCU)?)*)\s'
         r'(?P<temperature>\d{2}/\d{2})\s'
         r'(?P<pressure>Q\d{4})\s*'
         r'(?P<remarks>.*)?'
@@ -45,26 +64,26 @@ def parse_metar(raw_metar):
         elif wind == '00000KT':
             wind_info = "Calm wind"
         else:
-            wind_info = f"From {int(wind[:3])}° at {int(wind[3:5])} knots"
+            wind_info = f"From {wind[:3]}° at {int(wind[3:5])} knots"
             if 'G' in wind:
                 gust_speed = int(wind[wind.index('G')+1:wind.index('KT')])
                 wind_info += f", gusting to {gust_speed} knots"
         
-        current_year = datetime.utcnow().year
-        current_month = datetime.utcnow().strftime('%B')
-        
         day = int(groups['datetime'][:2])
         date_suffix = get_date_suffix(day)
         
+        cloud_layers = groups['clouds'].split()
+        clouds_info = ', '.join([parse_cloud_condition(cloud) for cloud in cloud_layers])
+        
         result = {
             'Location': groups['station'],
-            'Time': f"{groups['datetime'][2:4]}:{groups['datetime'][4:6]} UTC {day}{date_suffix} of {current_month} {current_year}",
+            'Time': f"{day}{date_suffix} of the current month at {groups['datetime'][2:4]}:{groups['datetime'][4:6]} UTC",
             'Wind': wind_info,
-            'Visibility': f"10+ km" if int(groups['visibility']) == 9999 else f"{int(groups['visibility'])} meters",
-            'Clouds': f"Few clouds at {int(groups['clouds'][3:])}00 feet AGL" if groups['clouds'].startswith('FEW') else groups['clouds'],
+            'Visibility': f"{int(groups['visibility'])} meters (10+ km)" if int(groups['visibility']) == 9999 else f"{int(groups['visibility'])} meters",
+            'Clouds': clouds_info,
             'Temperature': f"{groups['temperature'].split('/')[0]}.0°C",
             'Dewpoint': f"{groups['temperature'].split('/')[1]}.0°C",
-            'Pressure': f"{groups['pressure'][1:]} mbar",
+            'Pressure': f"{groups['pressure'][1:]} hPa",
             'Remarks': parse_remarks(groups.get('remarks', 'NOSIG'))
         }
         if groups['variable_wind']:
@@ -103,39 +122,36 @@ def parse_taf(raw_taf):
         r'(?P<change_clouds>FEW\d{3}|SCT\d{3}|BKN\d{3}|OVC\d{3})?\s*'
         r'(?P<change_weather>NSW)?'
     )
-    
-    current_year = datetime.utcnow().year
-    current_month = datetime.utcnow().strftime('%B')
-        
     match = taf_pattern.match(taf_lines[0])
     if match:
         groups = match.groupdict()
         wind = groups['wind']
         taf_info = {
             'Location': groups['station'],
-            'Issue Time': f"{groups['datetime'][:2]}{get_date_suffix(int(groups['datetime'][:2]))} of {current_month} {current_year} at {groups['datetime'][2:4]}:{groups['datetime'][4:6]} UTC",
-            'Forecast Validity': f"From {groups['validity'][:2]}{get_date_suffix(int(groups['validity'][:2]))} at {groups['validity'][2:4]}00 UTC to {groups['validity'][5:7]}{get_date_suffix(int(groups['validity'][5:7]))} at {groups['validity'][7:]}00 UTC" if int(groups['validity'][7:]) < 24 else f"From {groups['validity'][:2]}{get_date_suffix(int(groups['validity'][:2]))} at {groups['validity'][2:4]}00 UTC to {int(groups['validity'][5:7])+1}{get_date_suffix(int(groups['validity'][5:7])+1)} at 0000 UTC",
-            'Wind': f"From {int(wind[:3])}° at {int(wind[3:5])} knots",
-            'Visibility': f"10+ km" if int(groups['visibility']) == 9999 else f"{int(groups['visibility'])} meters",
-            'Clouds': f"Few clouds at {int(groups['clouds'][3:])}00 feet AGL" if groups['clouds'].startswith('FEW') else groups['clouds']
+            'Issue Time': f"{groups['datetime'][:2]}{get_date_suffix(int(groups['datetime'][:2]))} of the current month at {groups['datetime'][2:4]}:{groups['datetime'][4:6]} UTC",
+            'Forecast Validity': f"From {groups['validity'][:2]}{get_date_suffix(int(groups['validity'][:2]))} at {groups['validity'][2:4]} UTC to {groups['validity'][5:7]}{get_date_suffix(int(groups['validity'][5:7]))} at {groups['validity'][7:]} UTC",
+            'Wind': f"From {wind[:3]}° at {int(wind[3:5])} knots",
+            'Visibility': f"{int(groups['visibility'])} meters (10+ km)" if int(groups['visibility']) == 9999 else f"{int(groups['visibility'])} meters",
+            'Clouds': parse_cloud_condition(groups['clouds'])
         }
-        becmg_matches = []
+        
+        changes = []
         for line in taf_lines[1:]:
-            second_line_match = becmg_pattern.match(line.strip())
-            if second_line_match:
-                second_groups = second_line_match.groupdict()
-                change_info = {
-                    'Timeframe': f"Between {second_groups['change_time'][:2]}:00 and {second_groups['change_time'][2:4]}:00 UTC",
-                    'Wind': f"From {second_groups['change_wind'][:3]}° at {int(second_groups['change_wind'][3:5])} knots" if second_groups['change_wind'] else None,
-                    'Visibility': f"{int(second_groups['change_visibility'])} meters" if second_groups['change_visibility'] else None,
-                    'Clouds': second_groups['change_clouds'] if second_groups['change_clouds'] else None,
-                    'Weather': second_groups['change_weather'] if second_groups['change_weather'] else None
+            match_becmg = becmg_pattern.match(line)
+            if match_becmg:
+                change_groups = match_becmg.groupdict()
+                change = {
+                    'Timeframe': f"Between {change_groups['change_time'][:2]}:00 and {change_groups['change_time'][2:4]}:00 UTC on the {change_groups['change_time'][5:7]}{get_date_suffix(int(change_groups['change_time'][5:7]))}",
+                    'Wind': f"From {change_groups['change_wind'][:3]}° at {int(change_groups['change_wind'][3:5])} knots" if change_groups['change_wind'] else None,
+                    'Visibility': f"{int(change_groups['change_visibility'])} meters" if change_groups['change_visibility'] else None,
+                    'Clouds': parse_cloud_condition(change_groups['change_clouds']) if change_groups['change_clouds'] else None,
+                    'Weather': "No significant weather" if change_groups['change_weather'] == "NSW" else None
                 }
-                becmg_matches.append(change_info)
-        taf_info['Becoming'] = becmg_matches
+                changes.append(change)
+        taf_info['Becoming'] = changes
         return taf_info
     else:
-        return None
+        raise Exception("Failed to parse TAF data")
 
 def generate_report(metar_info, taf_info):
     metar_report = f"""
@@ -143,17 +159,13 @@ METAR Report for {metar_info['Location']}:
 -----------------------------------------
 Time: {metar_info['Time']}
 Wind: {metar_info['Wind']}
-"""
-    if 'Variable Wind' in metar_info:
-        metar_report += f"Variable Wind: {metar_info['Variable Wind']}\n"
-    metar_report += f"""Visibility: {metar_info['Visibility']}
+Visibility: {metar_info['Visibility']}
 Clouds: {metar_info['Clouds']}
 Temperature: {metar_info['Temperature']}
 Dewpoint: {metar_info['Dewpoint']}
-Pressure: {metar_info['Pressure']}
+Pressure: {metar_info['Pressure']} hPa
 Remarks: {metar_info['Remarks']}
 """
-
     print(metar_report)
 
     if taf_info:
@@ -166,8 +178,8 @@ Wind: {taf_info['Wind']}
 Visibility: {taf_info['Visibility']}
 Clouds: {taf_info['Clouds']}
 """
-        if 'Becoming' in taf_info:
-            taf_report += "\nBecoming:\n"
+        if 'Becoming' in taf_info and taf_info['Becoming']:
+            taf_report += "Becoming:\n"
             for change in taf_info['Becoming']:
                 taf_report += f"  - Timeframe: {change['Timeframe']}\n"
                 if change['Wind']:
@@ -181,14 +193,9 @@ Clouds: {taf_info['Clouds']}
         print(taf_report)
 
 def main():
-    icao_code = input("Enter ICAO code: ").upper()
+    icao_code = input("Enter ICAO code: ").strip().upper()
     raw_data = fetch_metar_taf_data(icao_code)
     
-    # raw_data = """WATT 220530Z 30008KT 240V330 9999 BKN017 33/25 Q1011 NOSIG
-
-# TAF WATT 220500Z 2206/2306 08016KT 9999 FEW018
-    # BECMG 2210/2212 10006KT"""
-
     raw_metar, raw_taf = raw_data.split('\n\n')[:2]
     
     try:
@@ -199,7 +206,8 @@ def main():
 
     try:
         taf_info = parse_taf(raw_taf)
-    except Exception:
+    except Exception as e:
+        print(f"Error parsing TAF data: {e}")
         taf_info = None
 
     generate_report(metar_info, taf_info)
