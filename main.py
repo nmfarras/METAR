@@ -52,7 +52,8 @@ def parse_metar(raw_metar):
         r'(?P<clouds>(CLR|SKC|NCD|NSC|FEW\d{3}(CB|TCU)?|SCT\d{3}(CB|TCU)?|BKN\d{3}(CB|TCU)?|OVC\d{3}(CB|TCU)?)(\sCLR|\sSKC|\sNCD|\sNSC|\sFEW\d{3}(CB|TCU)?|\sSCT\d{3}(CB|TCU)?|\sBKN\d{3}(CB|TCU)?|\sOVC\d{3}(CB|TCU)?)*)\s'
         r'(?P<temperature>\d{2}/\d{2})\s'
         r'(?P<pressure>Q\d{4})\s*'
-        r'(?P<remarks>.*)?'
+        r'(?P<forecast>(TEMPO|BECMG|PROB\d{2}|FM\d{4}|TL\d{4}|AT\d{4}|NSW)\s.*)?\s*'
+        r'(?P<remarks>RMK\s.*)?'
     )
     match = metar_pattern.match(raw_metar)
     if match:
@@ -88,6 +89,8 @@ def parse_metar(raw_metar):
         }
         if groups['variable_wind']:
             result['Variable Wind'] = f"Between {groups['variable_wind'][:3]}° and {groups['variable_wind'][4:]}°"
+        if groups['forecast']:
+            result['Forecast'] = groups['forecast']
         return result
     else:
         raise Exception("Failed to parse METAR data")
@@ -141,9 +144,9 @@ def parse_taf(raw_taf):
             if match_becmg:
                 change_groups = match_becmg.groupdict()
                 change = {
-                    'Timeframe': f"Between {change_groups['change_time'][:2]}:00 and {change_groups['change_time'][2:4]}:00 UTC on the {change_groups['change_time'][5:7]}{get_date_suffix(int(change_groups['change_time'][5:7]))}",
+                    'Timeframe': f"Between {change_groups['change_time'][:2]}{get_date_suffix(int(change_groups['change_time'][:2]))} at {change_groups['change_time'][2:4]} UTC and {change_groups['change_time'][5:7]}{get_date_suffix(int(change_groups['change_time'][5:7]))} at {change_groups['change_time'][7:]} UTC",
                     'Wind': f"From {change_groups['change_wind'][:3]}° at {int(change_groups['change_wind'][3:5])} knots" if change_groups['change_wind'] else None,
-                    'Visibility': f"{int(change_groups['change_visibility'])} meters" if change_groups['change_visibility'] else None,
+                    'Visibility': f"{int(change_groups['change_visibility'])} meters (10+ km)" if change_groups['change_visibility'] and int(change_groups['change_visibility']) == 9999 else f"{int(change_groups['change_visibility'])} meters" if change_groups['change_visibility'] else None,
                     'Clouds': parse_cloud_condition(change_groups['change_clouds']) if change_groups['change_clouds'] else None,
                     'Weather': "No significant weather" if change_groups['change_weather'] == "NSW" else None
                 }
@@ -196,7 +199,25 @@ def main():
     icao_code = input("Enter ICAO code: ").strip().upper()
     raw_data = fetch_metar_taf_data(icao_code)
     
+    raw_data = """WIII 280430Z 070009KT 020V110 9000 FEW018CB SCT019 32/24 Q1010 TEMPO FM0445 4000 TSRA RMK CB TO S AND SE
+
+TAF WIII 272300Z 2800/2906 15004KT 9999 FEW020
+    BECMG 2804/2806 07012KT
+	BECMG 2812/2814 19005KT
+"""
+    raw_data = """WATT 220530Z 30008KT 240V330 9999 BKN017 33/25 Q1011 NOSIG
+
+TAF WATT 220500Z 2206/2306 08016KT 9999 FEW018
+    BECMG 2210/2212 10006KT"""
+    
+    raw_data = """WALL 010400Z 22003KT 8000 -RA SCT020 27/27 Q1010
+
+TAF WALL 302300Z 0100/0206 27005KT 9999 FEW020
+  TEMPO 0102/0106 3500 -TSRA SCT017CB"""
+    
     raw_metar, raw_taf = raw_data.split('\n\n')[:2]
+    
+    print(raw_metar)
     
     try:
         metar_info = parse_metar(raw_metar)
