@@ -1,6 +1,7 @@
 import requests
 import re
 from datetime import datetime
+from metar_taf_parser.parser.parser import MetarParser, TAFParser
 
 def fetch_metar_taf_data(icao_code):
     url = f'https://aviationweather.gov/cgi-bin/data/metar.php?ids={icao_code}&hours=0&sep=true&taf=true'
@@ -332,33 +333,53 @@ def main():
     # BECMG 2210/2212 10006KT"""
     
     ### Still not working per 2024-07-01 (either metar and taf or taf only)
-    # raw_data = """WATT 011330Z AUTO 10012KT 9999 NCD 29/26 Q1013
+    raw_data = """WATT 011330Z AUTO 10012KT 9999 NCD 29/26 Q1013
 
-# TAF WATT 010500Z 0106/0206 10012KT 9999 SCT018
-    # TEMPO 0107/0110 12015G25KT"""
+TAF WATT 010500Z 0106/0206 10012KT 9999 SCT018
+    TEMPO 0107/0110 12015G25KT"""
     
     # raw_data = """WALL 011330Z 27004KT 9000 SCT020 27/26 Q1010 NOSIG
 
 # TAF COR WALL 011100Z 0112/0218 22005KT 9000 SCT020
     # TEMPO 0119/0123 4000 TSRA FEW018CB"""
     
+    raw_data = """WIII 150500Z 1506/1612 17005KT 6000 SCT012
+
+TAF WIII 150500Z 2900/3006 20005KT 8000 FEW020 SCT021
+  TEMPO 1506/1509 3000 BR BKN006 PROB40
+  TEMPO 1506/1508 0400 BCFG BKN002 PROB40 
+  TEMPO 1512/1516 4000 -SHRA FEW030TCU BKN040 
+  BECMG 1520/1522 CAVOK 
+  TEMPO 1603/1608 3000 BR BKN006 PROB40 
+  TEMPO 1604/1607 0400 BCFG BKN002 TX17/1512Z TN07/1605Z"""
+
+    
     print(raw_data)
     
     raw_metar, raw_taf = raw_data.split('\n\n')[:2]
     
-    try:
-        metar_info = parse_metar(raw_metar)
-    except Exception as e:
-        # print(f"Error parsing METAR data: {e}")
-        return
+    print(raw_taf)
+    
+    # try:
+        # metar_info = parse_metar(raw_metar)
+    # except Exception as e:
+        # # print(f"Error parsing METAR data: {e}")
+        # return
 
-    try:
-        taf_info = parse_taf(raw_taf)
-    except Exception as e:
-        # print(f"Error parsing TAF data: {e}")
-        taf_info = None
+    # try:
+        # taf_info = parse_taf(raw_taf)
+    # except Exception as e:
+        # # print(f"Error parsing TAF data: {e}")
+        # taf_info = None
 
-    generate_report(metar_info, taf_info)
+    # generate_report(metar_info, taf_info)
+    
+    metar = MetarParser().parse(raw_metar)
+    
+    taf = TAFParser().parse(raw_taf)
+    
+    print(metar)
+    print('\n',taf)
 
 if __name__ == "__main__":
     main()
